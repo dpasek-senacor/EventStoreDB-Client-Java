@@ -108,9 +108,9 @@ public class ReadAllRxJavaTests {
         }
 
         private static class PublisherSubscription implements Subscription {
-            final Subscriber<? super ResolvedEvent> subscriber;
-            final AtomicLong requested = new AtomicLong(0);
-            final AtomicBoolean cancelled = new AtomicBoolean(false);
+            private final Subscriber<? super ResolvedEvent> subscriber;
+            private final AtomicLong requested = new AtomicLong(0);
+            private final AtomicBoolean cancelled = new AtomicBoolean(false);
             private final Lock lock = new ReentrantLock();
             private final Condition hasRequested = lock.newCondition();
 
