@@ -1,7 +1,6 @@
 package com.eventstore.dbclient;
 
 import com.google.common.util.concurrent.Uninterruptibles;
-import io.perfmark.PerfMark;
 import io.reactivex.rxjava3.core.Flowable;
 import io.reactivex.rxjava3.schedulers.Schedulers;
 import org.junit.Rule;
@@ -43,7 +42,6 @@ public class ReadAllRxJavaTests {
 
         Flowable<ResolvedEvent> eventFlow = Flowable.fromPublisher(new EventPublisher(client, options, 1000));
         List<ResolvedEvent> result = new LinkedList<>();
-        PerfMark.setEnabled(true);
         eventFlow
                 .subscribeOn(Schedulers.io())
                 .observeOn(Schedulers.io())
@@ -53,7 +51,6 @@ public class ReadAllRxJavaTests {
                     result.add(e);
                 })
                 .blockingLast();
-        PerfMark.setEnabled(false);
 
         assertEquals(1000, result.size());
         verifyAgainstTestData(result, "all-e0-e10");
