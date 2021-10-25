@@ -1,7 +1,15 @@
 package com.eventstore.dbclient.samples.appending_events;
 
-import com.eventstore.dbclient.*;
+import com.eventstore.dbclient.AppendToStreamOptions;
+import com.eventstore.dbclient.EventData;
+import com.eventstore.dbclient.EventStoreDBClient;
+import com.eventstore.dbclient.ExpectedRevision;
+import com.eventstore.dbclient.ReadStreamOptions;
+import com.eventstore.dbclient.ResolvedEvent;
+import com.eventstore.dbclient.StreamRevision;
+import com.eventstore.dbclient.UserCredentials;
 import com.eventstore.dbclient.samples.TestEvent;
+import io.reactivex.rxjava3.subscribers.TestSubscriber;
 
 import java.util.List;
 import java.util.UUID;
@@ -93,9 +101,11 @@ public class AppendingEvents {
                 .forwards()
                 .fromStart();
 
-        List<ResolvedEvent> events = client.readStream("concurrency-stream", readStreamOptions, new EventCollectorReadObserver())
-                .get();
+        TestSubscriber<ResolvedEvent> testSubscriber = new TestSubscriber<>();
+        client.readStream("concurrency-stream", readStreamOptions).subscribe(testSubscriber);
 
+        testSubscriber.await();
+        List<ResolvedEvent> events = testSubscriber.values();
         ResolvedEvent lastEvent = events.get(events.size() - 1);
         StreamRevision revision = lastEvent.getEvent().getStreamRevision();
 

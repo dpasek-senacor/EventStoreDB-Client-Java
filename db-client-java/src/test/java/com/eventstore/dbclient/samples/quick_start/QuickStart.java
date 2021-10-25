@@ -1,9 +1,18 @@
 package com.eventstore.dbclient.samples.quick_start;
 
-import com.eventstore.dbclient.*;
+import com.eventstore.dbclient.AppendToStreamOptions;
+import com.eventstore.dbclient.EventData;
+import com.eventstore.dbclient.EventStoreDBClient;
+import com.eventstore.dbclient.EventStoreDBClientSettings;
+import com.eventstore.dbclient.EventStoreDBConnectionString;
+import com.eventstore.dbclient.ParseError;
+import com.eventstore.dbclient.ReadStreamOptions;
+import com.eventstore.dbclient.ResolvedEvent;
+import com.eventstore.dbclient.UserCredentials;
 import com.eventstore.dbclient.samples.TestEvent;
+import org.reactivestreams.Subscriber;
+import org.reactivestreams.Subscription;
 
-import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 
@@ -43,23 +52,27 @@ public class QuickStart {
                 .forwards()
                 .fromStart();
 
-        client.readStream("some-stream", 10, options, new ReadObserver<Object>() {
+        client.readStream("some-stream", 10, options).subscribe(new Subscriber<ResolvedEvent>() {
+
+            @Override
+            public void onSubscribe(Subscription s) {
+            }
+
             @Override
             public void onNext(ResolvedEvent event) {
                 // Doing something...
             }
 
             @Override
-            public Object onCompleted() {
-                return null;
+            public void onComplete() {
+
             }
 
             @Override
             public void onError(Throwable error) {
 
             }
-        })
-        .get();
+        });
         // endregion readStream
     }
 }

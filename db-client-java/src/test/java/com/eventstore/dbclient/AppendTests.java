@@ -1,11 +1,11 @@
 package com.eventstore.dbclient;
 
+import io.reactivex.rxjava3.subscribers.TestSubscriber;
 import org.junit.Rule;
 import org.junit.Test;
-import testcontainers.module.EventStoreTestDBContainer;
 import testcontainers.module.EventStoreStreamsClient;
+import testcontainers.module.EventStoreTestDBContainer;
 
-import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -71,11 +71,12 @@ public class AppendTests {
                 .backwards();
 
         // Ensure appended event is readable
-        List<ResolvedEvent> readEvents = client.readStream(streamName, 1, readStreamOptions, new EventCollectorReadObserver())
-                .get();
+        TestSubscriber<ResolvedEvent> testSubscriber = new TestSubscriber<>();
+        client.readStream(streamName, 1, readStreamOptions).subscribe(testSubscriber);
 
-        assertEquals(1, readEvents.size());
-        RecordedEvent first = readEvents.get(0).getEvent();
+        testSubscriber.await();
+        assertEquals(1, testSubscriber.values().size());
+        RecordedEvent first = testSubscriber.values().get(0).getEvent();
 
         assertEquals(streamName, first.getStreamId());
         assertEquals(eventType, first.getEventType());

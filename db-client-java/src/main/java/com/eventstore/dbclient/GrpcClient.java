@@ -13,6 +13,8 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -38,7 +40,15 @@ public abstract class GrpcClient {
 
     protected void startConnectionLoop() {
         pushMsg(new CreateChannel(this.currentChannelId));
-        CompletableFuture.runAsync(this::messageLoop);
+        CompletableFuture.runAsync(this::messageLoop, createConnectionLoopExecutor());
+    }
+
+    protected Executor createConnectionLoopExecutor() {
+        return Executors.newSingleThreadExecutor(r -> {
+            Thread thread = new Thread(r, "esdb-client-" + currentChannelId);
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
     protected abstract boolean doConnect();
