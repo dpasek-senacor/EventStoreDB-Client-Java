@@ -45,6 +45,7 @@ dependencies {
     testImplementation "junit:junit:${junitVersion}"
     testImplementation "org.slf4j:slf4j-nop:${slf4jNopVersion}"
     testImplementation "org.testcontainers:testcontainers:${testcontainersVersion}"
+    testImplementation "org.reactivestreams:reactive-streams-tck:1.0.3"
     testImplementation "io.reactivex.rxjava3:rxjava:3.1.2"
 
     testImplementation platform("com.fasterxml.jackson:jackson-bom:${jacksonVersion}")
