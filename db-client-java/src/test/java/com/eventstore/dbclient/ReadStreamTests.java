@@ -1,6 +1,8 @@
 package com.eventstore.dbclient;
 
+import io.reactivex.subscribers.TestSubscriber;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import testcontainers.module.EventStoreTestDBContainer;
@@ -11,6 +13,28 @@ public class ReadStreamTests {
     @Rule
     public final EventStoreTestDBContainer server = new EventStoreTestDBContainer(false);
 
+    private TestSubscriber<ResolvedEvent> testSubscriber;
+
+    @Before
+    public void setUp() {
+        testSubscriber = new TestSubscriber<>(0);
+    }
+
+    @Test
+    public void testNoEventsAreReceivedUnlessRequested() throws Throwable {
+        EventStoreDBClient client = server.getClient();
+
+        ReadStreamOptions options = ReadStreamOptions.get()
+                .forwards()
+                .fromStart()
+                .notResolveLinkTos();
+
+        client.readStream("dataset20M-1800", 10, options)
+                .subscribe(testSubscriber);
+
+        Assert.assertEquals(testSubscriber.values().size(), 0);
+    }
+
     @Test
     public void testReadStreamForward10EventsFromPositionStart() throws Throwable {
         EventStoreDBClient client = server.getClient();
@@ -20,10 +44,14 @@ public class ReadStreamTests {
                 .fromStart()
                 .notResolveLinkTos();
 
-        List<ResolvedEvent> result = client.readStream("dataset20M-1800", 10, options, new EventCollectorReadObserver())
-                .get();
+        client.readStream("dataset20M-1800", 10, options)
+                .subscribe(testSubscriber);
+        testSubscriber.requestMore(10);
 
-        verifyAgainstTestData(result, "dataset20M-1800-e0-e10");
+        testSubscriber.awaitCount(10);
+        testSubscriber.awaitTerminalEvent();
+        testSubscriber.assertComplete();
+        verifyAgainstTestData(testSubscriber.values(), "dataset20M-1800-e0-e10");
     }
 
     @Test
@@ -35,10 +63,14 @@ public class ReadStreamTests {
                 .fromEnd()
                 .notResolveLinkTos();
 
-        List<ResolvedEvent> result = client.readStream("dataset20M-1800", 10, options,  new EventCollectorReadObserver())
-                .get();
+       client.readStream("dataset20M-1800", 10, options)
+                .subscribe(testSubscriber);
+        testSubscriber.requestMore(10);
 
-        verifyAgainstTestData(result, "dataset20M-1800-e1999-e1990");
+        testSubscriber.awaitCount(10);
+        testSubscriber.awaitTerminalEvent();
+        testSubscriber.assertComplete();
+        verifyAgainstTestData(testSubscriber.values(), "dataset20M-1800-e1999-e1990");
     }
 
     @Test
@@ -50,16 +82,23 @@ public class ReadStreamTests {
                 .fromEnd()
                 .notResolveLinkTos();
 
-        List<ResolvedEvent> result1 = client.readStream("dataset20M-1800", Long.MAX_VALUE, options, new EventCollectorReadObserver())
-                .get();
+        client.readStream("dataset20M-1800", Long.MAX_VALUE, options)
+                .subscribe(testSubscriber);
 
-        List<ResolvedEvent> result2 = client.readStream("dataset20M-1800", options, new EventCollectorReadObserver())
-                .get();
+        TestSubscriber<ResolvedEvent> secondTestSubscriber = new TestSubscriber<>(0);
+        client.readStream("dataset20M-1800", options)
+                .subscribe(secondTestSubscriber);
+        testSubscriber.requestMore(Long.MAX_VALUE);
+        secondTestSubscriber.requestMore(Long.MAX_VALUE);
 
-        RecordedEvent firstEvent1 = result1.get(0).getOriginalEvent();
-        RecordedEvent firstEvent2 = result2.get(0).getOriginalEvent();
+        testSubscriber.awaitTerminalEvent();
+        secondTestSubscriber.awaitTerminalEvent();
+        List<ResolvedEvent> valuesOfFirstSubscription = testSubscriber.values();
+        List<ResolvedEvent> valuesOfSecondSubscription = secondTestSubscriber.values();
+        RecordedEvent firstEvent1 = valuesOfFirstSubscription.get(0).getOriginalEvent();
+        RecordedEvent firstEvent2 = valuesOfSecondSubscription.get(0).getOriginalEvent();
 
-        Assert.assertEquals(result1.size(), result2.size());
+        Assert.assertEquals(valuesOfFirstSubscription.size(), valuesOfSecondSubscription.size());
         Assert.assertEquals(firstEvent1.getEventId(), firstEvent2.getEventId());
     }
 

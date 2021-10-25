@@ -1,10 +1,14 @@
 package com.eventstore.dbclient;
 
+import io.reactivex.Flowable;
+import org.reactivestreams.Publisher;
+
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 public class EventStoreDBClient extends EventStoreDBClientBase {
     private EventStoreDBClient(EventStoreDBClientSettings settings) {
@@ -45,31 +49,38 @@ public class EventStoreDBClient extends EventStoreDBClientBase {
         EventData event = EventDataBuilder.json("$metadata", metadata.serialize()).build();
 
         return appendToStream("$$" + streamName, options, event);
-     }
-
-    public <A> CompletableFuture<A> readStream(String streamName, ReadObserver<A> observer) {
-        return this.readStream(streamName, Long.MAX_VALUE, ReadStreamOptions.get(), observer);
     }
 
-    public <A> CompletableFuture<A> readStream(String streamName, long maxCount, ReadObserver<A> observer) {
-        return this.readStream(streamName, maxCount, ReadStreamOptions.get(), observer);
+    public Publisher<ResolvedEvent> readStream(String streamName) {
+        return this.readStream(streamName, Long.MAX_VALUE, ReadStreamOptions.get());
     }
 
-    public <A> CompletableFuture<A> readStream(String streamName, ReadStreamOptions options, ReadObserver<A> observer) {
-        return this.readStream(streamName, Long.MAX_VALUE, options, observer);
+    public Publisher<ResolvedEvent> readStream(String streamName, long maxCount) {
+        return this.readStream(streamName, maxCount, ReadStreamOptions.get());
     }
 
-    public <A> CompletableFuture<A> readStream(String streamName, long maxCount, ReadStreamOptions options, ReadObserver<A> observer) {
+    public Publisher<ResolvedEvent> readStream(String streamName, ReadStreamOptions options) {
+        return this.readStream(streamName, Long.MAX_VALUE, options);
+    }
+
+    public Publisher<ResolvedEvent> readStream(String streamName, long maxCount, ReadStreamOptions options) {
         if (options == null)
             options = ReadStreamOptions.get();
 
         if (!options.hasUserCredentials())
             options.authenticated(this.credentials);
 
-        return new ReadStream(this.client, streamName, maxCount, options).execute(observer);
+        try {
+            return new ReadStream(this.client, streamName, maxCount, options).execute().get();
+        } catch (InterruptedException e) {
+
+        } catch (ExecutionException e) {
+            e.printStackTrace();
+        }
+        throw new RuntimeException();
     }
 
-    public CompletableFuture<StreamMetadata> getStreamMetadata(String streamName) {
+    public Publisher<StreamMetadata> getStreamMetadata(String streamName) {
         return getStreamMetadata(streamName, null);
     }
 
@@ -92,7 +103,7 @@ public class EventStoreDBClient extends EventStoreDBClientBase {
         }
 
         @Override
-        public  StreamMetadata onCompleted() {
+        public StreamMetadata onCompleted() {
             return metadata;
         }
 
@@ -106,38 +117,31 @@ public class EventStoreDBClient extends EventStoreDBClientBase {
         }
     }
 
-    public CompletableFuture<StreamMetadata> getStreamMetadata(String streamName, ReadStreamOptions options) {
-        final StreamMetadataReadObserver observer = new StreamMetadataReadObserver();
-        return readStream("$$" + streamName, options, observer).exceptionally(e -> {
-            Throwable reason = e.getCause() != null ? e.getCause() : e;
-            if (reason instanceof StreamNotFoundException) {
-                return observer.getStreamMetadata();
-            }
-
-            throw new RuntimeException(e);
-        });
+    public Publisher<StreamMetadata> getStreamMetadata(String streamName, ReadStreamOptions options) {
+        return Flowable.fromPublisher(readStream("$$" + streamName, options)).map(event ->
+                StreamMetadata.deserialize(event.getOriginalEvent().getEventDataAs(HashMap.class)));
     }
 
-    public <A> CompletableFuture<A> readAll(ReadObserver<A> observer) {
-        return this.readAll(Long.MAX_VALUE, ReadAllOptions.get(), observer);
+    public Publisher<ResolvedEvent> readAll() {
+        return this.readAll(Long.MAX_VALUE, ReadAllOptions.get());
     }
 
-    public <A> CompletableFuture<A> readAll(long maxCount, ReadObserver<A> observer) {
-        return this.readAll(maxCount, ReadAllOptions.get(), observer);
+    public Publisher<ResolvedEvent> readAll(long maxCount) {
+        return this.readAll(maxCount, ReadAllOptions.get());
     }
 
-    public <A> CompletableFuture<A> readAll(ReadAllOptions options, ReadObserver<A> observer) {
-        return this.readAll(Long.MAX_VALUE, options, observer);
+    public Publisher<ResolvedEvent> readAll(ReadAllOptions options) {
+        return this.readAll(Long.MAX_VALUE, options);
     }
 
-    public <A> CompletableFuture<A> readAll(long maxCount, ReadAllOptions options, ReadObserver<A> observer) {
+    public Publisher<ResolvedEvent> readAll(long maxCount, ReadAllOptions options) {
         if (options == null)
             options = ReadAllOptions.get();
 
         if (!options.hasUserCredentials())
             options.authenticated(this.credentials);
 
-        return new ReadAll(this.client, maxCount, options).execute(observer);
+        return new ReadAll(this.client, maxCount, options).execute().join();
     }
 
     public CompletableFuture<Subscription> subscribeToStream(String streamName, SubscriptionListener listener) {

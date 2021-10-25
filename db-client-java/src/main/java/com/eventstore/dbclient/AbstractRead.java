@@ -5,10 +5,12 @@ import com.eventstore.dbclient.proto.streams.StreamsGrpc;
 import com.eventstore.dbclient.proto.streams.StreamsOuterClass;
 import io.grpc.Metadata;
 import io.grpc.StatusRuntimeException;
+import io.grpc.stub.ClientCallStreamObserver;
+import io.grpc.stub.ClientResponseObserver;
 import io.grpc.stub.MetadataUtils;
-import io.grpc.stub.StreamObserver;
+import org.reactivestreams.Publisher;
+import org.reactivestreams.Subscription;
 
-import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 
 public abstract class AbstractRead {
@@ -30,7 +32,7 @@ public abstract class AbstractRead {
 
     public abstract StreamsOuterClass.ReadReq.Options.Builder createOptions();
 
-    public <A> CompletableFuture<A> execute(final ReadObserver<A> observer) {
+    public CompletableFuture<Publisher<ResolvedEvent>> execute() {
         return this.client.run(channel -> {
             StreamsOuterClass.ReadReq request = StreamsOuterClass.ReadReq.newBuilder()
                     .setOptions(createOptions())
@@ -39,67 +41,64 @@ public abstract class AbstractRead {
             Metadata headers = this.metadata;
             StreamsGrpc.StreamsStub client = MetadataUtils.attachHeaders(StreamsGrpc.newStub(channel), headers);
 
-            CompletableFuture<A> future = new CompletableFuture<>();
-            client.read(request, new StreamObserver<StreamsOuterClass.ReadResp>() {
-                private boolean completed = false;
+            Publisher<ResolvedEvent> eventPublisher = subscriber -> {
+                client.read(request, new ClientResponseObserver<StreamsOuterClass.ReadReq, StreamsOuterClass.ReadResp>() {
 
-                @Override
-                public void onNext(StreamsOuterClass.ReadResp value) {
-                    if (value.hasStreamNotFound()) {
-                        observer.onStreamNotFound();
-                        future.completeExceptionally(new StreamNotFoundException());
-                        this.completed = true;
-                        return;
+                    @Override
+                    public void beforeStart(ClientCallStreamObserver<StreamsOuterClass.ReadReq> requestStream) {
+                        requestStream.disableAutoRequestWithInitial(0);
+                        subscriber.onSubscribe(new Subscription() {
+                            @Override
+                            public void request(long n) {
+                                requestStream.request((int) Math.min(n, (long) Integer.MAX_VALUE));
+                            }
+
+                            @Override
+                            public void cancel() {
+                                requestStream.cancel("Subscription was cancelled", null);
+                            }
+                        });
                     }
 
-                    if (value.hasEvent()) {
+                    @Override
+                    public void onNext(StreamsOuterClass.ReadResp value) {
+                        if (value.hasEvent()) {
+                            try {
+                                subscriber.onNext(ResolvedEvent.fromWire(value.getEvent()));
+                            } catch (Throwable t) {
+                                subscriber.onError(t);
+                            }
+                        }
+                    }
+
+                    @Override
+                    public void onCompleted() {
                         try {
-                            observer.onNext(ResolvedEvent.fromWire(value.getEvent()));
+                            subscriber.onComplete();
                         } catch (Throwable t) {
-                            observer.onError(t);
-                            future.completeExceptionally(t);
-                            this.completed = true;
-                        }
-                    }
-                }
-
-                @Override
-                public void onCompleted() {
-                    if (this.completed) {
-                        return;
-                    }
-
-                    try {
-                        future.complete(observer.onCompleted());
-                    } catch (Throwable t) {
-                        future.completeExceptionally(t);
-                    }
-                }
-
-                @Override
-                public void onError(Throwable t) {
-                    if (this.completed) {
-                        return;
-                    }
-
-                    if (t instanceof StatusRuntimeException) {
-                        StatusRuntimeException e = (StatusRuntimeException) t;
-                        String leaderHost = e.getTrailers().get(Metadata.Key.of("leader-endpoint-host", Metadata.ASCII_STRING_MARSHALLER));
-                        String leaderPort = e.getTrailers().get(Metadata.Key.of("leader-endpoint-port", Metadata.ASCII_STRING_MARSHALLER));
-
-                        if (leaderHost != null && leaderPort != null) {
-                            NotLeaderException reason = new NotLeaderException(leaderHost, Integer.valueOf(leaderPort));
-                            observer.onError(reason);
-                            future.completeExceptionally(reason);
-                            return;
+                            subscriber.onError(t);
                         }
                     }
 
-                    observer.onError(t);
-                    future.completeExceptionally(t);
-                }
-            });
-            return future;
+                    @Override
+                    public void onError(Throwable t) {
+                        if (t instanceof StatusRuntimeException) {
+                            StatusRuntimeException e = (StatusRuntimeException) t;
+                            String leaderHost = e.getTrailers().get(Metadata.Key.of("leader-endpoint-host", Metadata.ASCII_STRING_MARSHALLER));
+                            String leaderPort = e.getTrailers().get(Metadata.Key.of("leader-endpoint-port", Metadata.ASCII_STRING_MARSHALLER));
+
+                            if (leaderHost != null && leaderPort != null) {
+                                NotLeaderException reason = new NotLeaderException(leaderHost, Integer.valueOf(leaderPort));
+                                subscriber.onError(reason);
+                                return;
+                            }
+                        }
+
+                        subscriber.onError(t);
+                    }
+                });
+            };
+            return CompletableFuture.supplyAsync(() -> eventPublisher);
         });
     }
 }
