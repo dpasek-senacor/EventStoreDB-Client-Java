@@ -1,6 +1,6 @@
 package com.eventstore.dbclient;
 
-import io.reactivex.subscribers.TestSubscriber;
+import io.reactivex.rxjava3.subscribers.TestSubscriber;
 import org.junit.Rule;
 import org.junit.Test;
 import testcontainers.module.EventStoreStreamsClient;

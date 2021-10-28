@@ -40,10 +40,11 @@ dependencies {
     implementation "io.grpc:grpc-protobuf:${grpcVersion}"
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.11.1'
     implementation "org.slf4j:slf4j-api:1.7.30"
-    implementation 'io.reactivex.rxjava2:rxjava:2.2.21'
+    implementation "io.reactivex.rxjava3:rxjava:3.1.2"
 
     testImplementation "junit:junit:${junitVersion}"
     testImplementation "org.slf4j:slf4j-nop:${slf4jNopVersion}"
+    testImplementation "org.reactivestreams:reactive-streams-tck:${reactiveStreamsApiVersion}"
     testImplementation "org.testcontainers:testcontainers:${testcontainersVersion}"
 
     testImplementation platform("com.fasterxml.jackson:jackson-bom:${jacksonVersion}")

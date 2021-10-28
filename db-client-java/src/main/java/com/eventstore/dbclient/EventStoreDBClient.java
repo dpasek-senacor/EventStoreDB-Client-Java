@@ -1,14 +1,13 @@
 package com.eventstore.dbclient;
 
-import io.reactivex.Flowable;
 import org.reactivestreams.Publisher;
+import org.reactivestreams.Subscriber;
 
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 
 public class EventStoreDBClient extends EventStoreDBClientBase {
     private EventStoreDBClient(EventStoreDBClientSettings settings) {
@@ -70,22 +69,22 @@ public class EventStoreDBClient extends EventStoreDBClientBase {
         if (!options.hasUserCredentials())
             options.authenticated(this.credentials);
 
-        try {
-            return new ReadStream(this.client, streamName, maxCount, options).execute().get();
-        } catch (InterruptedException e) {
-
-        } catch (ExecutionException e) {
-            e.printStackTrace();
-        }
-        throw new RuntimeException();
+        return new ReadStream(this.client, streamName, maxCount, options).execute();
     }
 
-    public Publisher<StreamMetadata> getStreamMetadata(String streamName) {
+    public CompletableFuture<StreamMetadata> getStreamMetadata(String streamName) {
         return getStreamMetadata(streamName, null);
     }
 
-    static class StreamMetadataReadObserver extends ReadObserver<StreamMetadata> {
-        StreamMetadata metadata;
+    static class StreamMetadataSubscriber implements Subscriber<ResolvedEvent> {
+
+        private StreamMetadata metadata = new StreamMetadata();
+        private final CompletableFuture<StreamMetadata> future = new CompletableFuture<>();
+
+        @Override
+        public void onSubscribe(org.reactivestreams.Subscription s) {
+            s.request(Long.MAX_VALUE);
+        }
 
         @Override
         public void onNext(ResolvedEvent event) {
@@ -98,28 +97,24 @@ public class EventStoreDBClient extends EventStoreDBClientBase {
         }
 
         @Override
-        public void onStreamNotFound() {
-            metadata = new StreamMetadata();
-        }
-
-        @Override
-        public StreamMetadata onCompleted() {
-            return metadata;
+        public void onComplete() {
+            future.complete(metadata);
         }
 
         @Override
         public void onError(Throwable error) {
-
+            future.completeExceptionally(error);
         }
 
-        public StreamMetadata getStreamMetadata() {
-            return metadata;
+        public CompletableFuture<StreamMetadata> getStreamMetadata() {
+            return future;
         }
     }
 
-    public Publisher<StreamMetadata> getStreamMetadata(String streamName, ReadStreamOptions options) {
-        return Flowable.fromPublisher(readStream("$$" + streamName, options)).map(event ->
-                StreamMetadata.deserialize(event.getOriginalEvent().getEventDataAs(HashMap.class)));
+    public CompletableFuture<StreamMetadata> getStreamMetadata(String streamName, ReadStreamOptions options) {
+        final StreamMetadataSubscriber streamMetadataSubscriber = new StreamMetadataSubscriber();
+        readStream("$$" + streamName, options).subscribe(streamMetadataSubscriber);
+        return streamMetadataSubscriber.getStreamMetadata();
     }
 
     public Publisher<ResolvedEvent> readAll() {
@@ -141,7 +136,7 @@ public class EventStoreDBClient extends EventStoreDBClientBase {
         if (!options.hasUserCredentials())
             options.authenticated(this.credentials);
 
-        return new ReadAll(this.client, maxCount, options).execute().join();
+        return new ReadAll(this.client, maxCount, options).execute();
     }
 
     public CompletableFuture<Subscription> subscribeToStream(String streamName, SubscriptionListener listener) {

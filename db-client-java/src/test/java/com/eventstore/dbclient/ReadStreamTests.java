@@ -1,6 +1,6 @@
 package com.eventstore.dbclient;
 
-import io.reactivex.subscribers.TestSubscriber;
+import io.reactivex.rxjava3.subscribers.TestSubscriber;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -8,6 +8,7 @@ import org.junit.Test;
 import testcontainers.module.EventStoreTestDBContainer;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 public class ReadStreamTests {
     @Rule
@@ -49,7 +50,7 @@ public class ReadStreamTests {
         testSubscriber.requestMore(10);
 
         testSubscriber.awaitCount(10);
-        testSubscriber.awaitTerminalEvent();
+        testSubscriber.awaitDone(5, TimeUnit.SECONDS);
         testSubscriber.assertComplete();
         verifyAgainstTestData(testSubscriber.values(), "dataset20M-1800-e0-e10");
     }
@@ -68,7 +69,7 @@ public class ReadStreamTests {
         testSubscriber.requestMore(10);
 
         testSubscriber.awaitCount(10);
-        testSubscriber.awaitTerminalEvent();
+        testSubscriber.awaitDone(5, TimeUnit.SECONDS);
         testSubscriber.assertComplete();
         verifyAgainstTestData(testSubscriber.values(), "dataset20M-1800-e1999-e1990");
     }
@@ -91,8 +92,8 @@ public class ReadStreamTests {
         testSubscriber.requestMore(Long.MAX_VALUE);
         secondTestSubscriber.requestMore(Long.MAX_VALUE);
 
-        testSubscriber.awaitTerminalEvent();
-        secondTestSubscriber.awaitTerminalEvent();
+        testSubscriber.awaitDone(5, TimeUnit.SECONDS);
+        secondTestSubscriber.awaitDone(5, TimeUnit.SECONDS);
         List<ResolvedEvent> valuesOfFirstSubscription = testSubscriber.values();
         List<ResolvedEvent> valuesOfSecondSubscription = secondTestSubscriber.values();
         RecordedEvent firstEvent1 = valuesOfFirstSubscription.get(0).getOriginalEvent();

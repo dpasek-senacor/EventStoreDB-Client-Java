@@ -11,9 +11,14 @@ import io.grpc.stub.MetadataUtils;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 public abstract class AbstractRead {
+
+    private static final String MANUAL_CANCELLATION_MESSAGE = "Subscription was manually cancelled";
+
     protected static final StreamsOuterClass.ReadReq.Options.Builder defaultReadOptions;
 
     private final GrpcClient client;
@@ -32,8 +37,8 @@ public abstract class AbstractRead {
 
     public abstract StreamsOuterClass.ReadReq.Options.Builder createOptions();
 
-    public CompletableFuture<Publisher<ResolvedEvent>> execute() {
-        return this.client.run(channel -> {
+    public Publisher<ResolvedEvent> execute() {
+        CompletableFuture<Publisher<ResolvedEvent>> publisherFuture = this.client.run(channel -> {
             StreamsOuterClass.ReadReq request = StreamsOuterClass.ReadReq.newBuilder()
                     .setOptions(createOptions())
                     .build();
@@ -42,20 +47,28 @@ public abstract class AbstractRead {
             StreamsGrpc.StreamsStub client = MetadataUtils.attachHeaders(StreamsGrpc.newStub(channel), headers);
 
             Publisher<ResolvedEvent> eventPublisher = subscriber -> {
-                client.read(request, new ClientResponseObserver<StreamsOuterClass.ReadReq, StreamsOuterClass.ReadResp>() {
+                final List<Subscription> subscriptions = new ArrayList<>(1);
+                ClientResponseObserver<StreamsOuterClass.ReadReq, StreamsOuterClass.ReadResp> clientResponseObserver = new ClientResponseObserver<StreamsOuterClass.ReadReq, StreamsOuterClass.ReadResp>() {
 
                     @Override
                     public void beforeStart(ClientCallStreamObserver<StreamsOuterClass.ReadReq> requestStream) {
                         requestStream.disableAutoRequestWithInitial(0);
-                        subscriber.onSubscribe(new Subscription() {
+                        subscriptions.add(new Subscription() {
                             @Override
                             public void request(long n) {
-                                requestStream.request((int) Math.min(n, (long) Integer.MAX_VALUE));
+                                try {
+                                    if (n < 1) {
+                                        throw new IllegalArgumentException("Number requested must be positive");
+                                    }
+                                    requestStream.request((int) Math.min(n, Integer.MAX_VALUE));
+                                } catch (Throwable t) {
+                                    subscriber.onError(t);
+                                }
                             }
 
                             @Override
                             public void cancel() {
-                                requestStream.cancel("Subscription was cancelled", null);
+                                requestStream.cancel(MANUAL_CANCELLATION_MESSAGE, null);
                             }
                         });
                     }
@@ -84,6 +97,9 @@ public abstract class AbstractRead {
                     public void onError(Throwable t) {
                         if (t instanceof StatusRuntimeException) {
                             StatusRuntimeException e = (StatusRuntimeException) t;
+                            if (e.getStatus() != null && MANUAL_CANCELLATION_MESSAGE.equals(e.getStatus().getDescription())) {
+                                return;
+                            }
                             String leaderHost = e.getTrailers().get(Metadata.Key.of("leader-endpoint-host", Metadata.ASCII_STRING_MARSHALLER));
                             String leaderPort = e.getTrailers().get(Metadata.Key.of("leader-endpoint-port", Metadata.ASCII_STRING_MARSHALLER));
 
@@ -96,9 +112,16 @@ public abstract class AbstractRead {
 
                         subscriber.onError(t);
                     }
-                });
+                };
+                client.read(request, clientResponseObserver);
+                try {
+                    subscriber.onSubscribe(subscriptions.get(0));
+                } catch (Throwable t) {
+                    subscriber.onError(t);
+                }
             };
-            return CompletableFuture.supplyAsync(() -> eventPublisher);
+            return CompletableFuture.completedFuture(eventPublisher);
         });
+        return publisherFuture.join();
     }
 }
