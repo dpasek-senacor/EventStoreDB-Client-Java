@@ -16,8 +16,6 @@ class ClientReadResponseObserver implements ClientResponseObserver<StreamsOuterC
 
     private Subscription subscription;
 
-    private boolean initialRequest = true;
-
     private boolean completed;
 
     public ClientReadResponseObserver(Subscriber<? super ResolvedEvent> subscriber) {
@@ -30,7 +28,7 @@ class ClientReadResponseObserver implements ClientResponseObserver<StreamsOuterC
 
     @Override
     public void beforeStart(ClientCallStreamObserver<StreamsOuterClass.ReadReq> requestStream) {
-        requestStream.disableAutoRequestWithInitial(1);
+        requestStream.disableAutoRequestWithInitial(0);
         subscription = new Subscription() {
             @Override
             public void request(long n) {
@@ -38,15 +36,10 @@ class ClientReadResponseObserver implements ClientResponseObserver<StreamsOuterC
                     if (n < 1) {
                         throw new IllegalArgumentException("non-positive subscription request: " + n);
                     }
-                    long requested =  initialRequest ? n - 1 : n;
-                    if (requested > 0) {
-                        requestStream.request((int) Math.min(requested, Integer.MAX_VALUE));
-                    }
+                    requestStream.request((int) Math.min(n, Integer.MAX_VALUE));
                 } catch (Throwable t) {
                     subscriber.onError(t);
                     completed = true;
-                } finally {
-                    initialRequest = false;
                 }
             }
 
