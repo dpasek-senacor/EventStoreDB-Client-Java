@@ -42,6 +42,6 @@ public class ReadStreamPublisherVerification extends ReactiveStreamsPublisherVer
     @Override
     public Publisher<ResolvedEvent> createFailedPublisher() {
 
-        return null;
+        return client.readStream("unknown-streamtutututtu");
     }
 }

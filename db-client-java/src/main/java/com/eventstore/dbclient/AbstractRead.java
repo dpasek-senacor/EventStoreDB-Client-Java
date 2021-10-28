@@ -4,17 +4,13 @@ import com.eventstore.dbclient.proto.shared.Shared;
 import com.eventstore.dbclient.proto.streams.StreamsGrpc;
 import com.eventstore.dbclient.proto.streams.StreamsOuterClass;
 import io.grpc.Metadata;
-import io.grpc.stub.ClientResponseObserver;
 import io.grpc.stub.MetadataUtils;
 import org.reactivestreams.Publisher;
-import org.reactivestreams.Subscription;
+import org.reactivestreams.Subscriber;
 
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
-public abstract class AbstractRead {
+public abstract class AbstractRead implements Publisher<ResolvedEvent> {
 
     protected static final StreamsOuterClass.ReadReq.Options.Builder defaultReadOptions;
 
@@ -34,8 +30,12 @@ public abstract class AbstractRead {
 
     public abstract StreamsOuterClass.ReadReq.Options.Builder createOptions();
 
-    public Publisher<ResolvedEvent> execute() {
-        CompletableFuture<Publisher<ResolvedEvent>> publisherFuture = this.client.run(channel -> {
+    @Override
+    public void subscribe(Subscriber<? super ResolvedEvent> subscriber) {
+        if (subscriber == null) {
+            throw new NullPointerException();
+        }
+        this.client.run(channel -> {
             StreamsOuterClass.ReadReq request = StreamsOuterClass.ReadReq.newBuilder()
                     .setOptions(createOptions())
                     .build();
@@ -43,20 +43,11 @@ public abstract class AbstractRead {
             Metadata headers = this.metadata;
             StreamsGrpc.StreamsStub client = MetadataUtils.attachHeaders(StreamsGrpc.newStub(channel), headers);
 
-            Publisher<ResolvedEvent> eventPublisher = subscriber -> {
-                final CompletableFuture<Subscription> subscriptionFuture = new CompletableFuture<>();
-                ClientResponseObserver<StreamsOuterClass.ReadReq, StreamsOuterClass.ReadResp> clientResponseObserver = new ClientReadResponseObserver(subscriptionFuture, subscriber);
-                client.read(request, clientResponseObserver);
-                try {
-                    Subscription subscription = subscriptionFuture.get(0, TimeUnit.SECONDS);
-                    subscriber.onSubscribe(subscription);
-                } catch (InterruptedException | ExecutionException | TimeoutException e) {
-                    throw new RuntimeException(e);
-                }
-            };
-            return CompletableFuture.completedFuture(eventPublisher);
+            ClientReadResponseObserver clientResponseObserver = new ClientReadResponseObserver(subscriber);
+            client.read(request, clientResponseObserver);
+            subscriber.onSubscribe(clientResponseObserver.getSubscription());
+            return CompletableFuture.completedFuture(this);
         });
-        return publisherFuture.join();
     }
 
 }

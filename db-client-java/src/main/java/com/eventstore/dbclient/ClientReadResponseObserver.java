@@ -8,37 +8,45 @@ import io.grpc.stub.ClientResponseObserver;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
 
-import java.util.concurrent.CompletableFuture;
-
 class ClientReadResponseObserver implements ClientResponseObserver<StreamsOuterClass.ReadReq, StreamsOuterClass.ReadResp> {
 
     private static final String MANUAL_CANCELLATION_MESSAGE = "Subscription was manually cancelled";
 
-    private final CompletableFuture<Subscription> subscriptionFuture;
     private final Subscriber<? super ResolvedEvent> subscriber;
+
+    private Subscription subscription;
+
+    private boolean initialRequest = true;
 
     private boolean completed;
 
-    public ClientReadResponseObserver(CompletableFuture<Subscription> subscriptionFuture, Subscriber<? super ResolvedEvent> subscriber) {
-        this.subscriptionFuture = subscriptionFuture;
+    public ClientReadResponseObserver(Subscriber<? super ResolvedEvent> subscriber) {
         this.subscriber = subscriber;
+    }
+
+    public Subscription getSubscription() {
+        return subscription;
     }
 
     @Override
     public void beforeStart(ClientCallStreamObserver<StreamsOuterClass.ReadReq> requestStream) {
-        requestStream.disableAutoRequestWithInitial(0);
-
-        subscriptionFuture.complete(new Subscription() {
+        requestStream.disableAutoRequestWithInitial(1);
+        subscription = new Subscription() {
             @Override
             public void request(long n) {
                 try {
                     if (n < 1) {
-                        throw new IllegalArgumentException("Number requested must be positive");
+                        throw new IllegalArgumentException("non-positive subscription request: " + n);
                     }
-                    requestStream.request((int) Math.min(n, Integer.MAX_VALUE));
+                    long requested =  initialRequest ? n - 1 : n;
+                    if (requested > 0) {
+                        requestStream.request((int) Math.min(requested, Integer.MAX_VALUE));
+                    }
                 } catch (Throwable t) {
                     subscriber.onError(t);
                     completed = true;
+                } finally {
+                    initialRequest = false;
                 }
             }
 
@@ -46,7 +54,7 @@ class ClientReadResponseObserver implements ClientResponseObserver<StreamsOuterC
             public void cancel() {
                 requestStream.cancel(MANUAL_CANCELLATION_MESSAGE, null);
             }
-        });
+        };
     }
 
     @Override

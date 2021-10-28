@@ -69,7 +69,7 @@ public class EventStoreDBClient extends EventStoreDBClientBase {
         if (!options.hasUserCredentials())
             options.authenticated(this.credentials);
 
-        return new ReadStream(this.client, streamName, maxCount, options).execute();
+        return new ReadStream(this.client, streamName, maxCount, options);
     }
 
     public CompletableFuture<StreamMetadata> getStreamMetadata(String streamName) {
@@ -143,7 +143,7 @@ public class EventStoreDBClient extends EventStoreDBClientBase {
         if (!options.hasUserCredentials())
             options.authenticated(this.credentials);
 
-        return new ReadAll(this.client, maxCount, options).execute();
+        return new ReadAll(this.client, maxCount, options);
     }
 
     public CompletableFuture<Subscription> subscribeToStream(String streamName, SubscriptionListener listener) {
