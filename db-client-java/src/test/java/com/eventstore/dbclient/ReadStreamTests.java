@@ -18,11 +18,73 @@ public class ReadStreamTests {
 
     @Before
     public void setUp() {
-        testSubscriber = new TestSubscriber<>(0);
+        testSubscriber = new TestSubscriber<>(10);
     }
 
     @Test
-    public void testNoEventsAreReceivedUnlessRequested() throws Throwable {
+    public void testReadStreamForward10EventsFromPositionStart() {
+        EventStoreDBClient client = server.getClient();
+
+        ReadStreamOptions options = ReadStreamOptions.get()
+                .forwards()
+                .fromStart()
+                .notResolveLinkTos();
+
+        client.readStream("dataset20M-1800", 10, options)
+                .subscribe(testSubscriber);
+
+        testSubscriber.awaitDone(5, TimeUnit.SECONDS);
+        testSubscriber.assertComplete();
+        verifyAgainstTestData(testSubscriber.values(), "dataset20M-1800-e0-e10");
+    }
+
+    @Test
+    public void testReadStreamBackward10EventsFromPositionEnd() {
+        EventStoreDBClient client = server.getClient();
+
+        ReadStreamOptions options = ReadStreamOptions.get()
+                .backwards()
+                .fromEnd()
+                .notResolveLinkTos();
+
+       client.readStream("dataset20M-1800", 10, options)
+                .subscribe(testSubscriber);
+
+        testSubscriber.awaitDone(5, TimeUnit.SECONDS);
+        testSubscriber.assertComplete();
+        verifyAgainstTestData(testSubscriber.values(), "dataset20M-1800-e1999-e1990");
+    }
+
+    @Test
+    public void testReadStreamOptionsAreNotIgnoredInOverloadedMethod() {
+        EventStoreDBClient client = server.getClient();
+
+        ReadStreamOptions options = ReadStreamOptions.get()
+                .backwards()
+                .fromEnd()
+                .notResolveLinkTos();
+
+        client.readStream("dataset20M-1800", Long.MAX_VALUE, options)
+                .subscribe(testSubscriber);
+
+        TestSubscriber<ResolvedEvent> secondTestSubscriber = new TestSubscriber<>(10);
+        client.readStream("dataset20M-1800", options)
+                .subscribe(secondTestSubscriber);
+
+        testSubscriber.awaitDone(5, TimeUnit.SECONDS);
+        secondTestSubscriber.awaitDone(5, TimeUnit.SECONDS);
+        List<ResolvedEvent> valuesOfFirstSubscription = testSubscriber.values();
+        List<ResolvedEvent> valuesOfSecondSubscription = secondTestSubscriber.values();
+        RecordedEvent firstEvent1 = valuesOfFirstSubscription.get(0).getOriginalEvent();
+        RecordedEvent firstEvent2 = valuesOfSecondSubscription.get(0).getOriginalEvent();
+
+        Assert.assertEquals(valuesOfFirstSubscription.size(), valuesOfSecondSubscription.size());
+        Assert.assertEquals(firstEvent1.getEventId(), firstEvent2.getEventId());
+    }
+
+    @Test
+    public void testNoEventsAreReceivedUnlessRequested() {
+        testSubscriber = new TestSubscriber<>(0);
         EventStoreDBClient client = server.getClient();
 
         ReadStreamOptions options = ReadStreamOptions.get()
@@ -37,8 +99,25 @@ public class ReadStreamTests {
     }
 
     @Test
-    public void testReadStreamForward10EventsFromPositionStart() throws Throwable {
+    public void testReadingNonExistingStreamFails() {
         EventStoreDBClient client = server.getClient();
+
+        ReadStreamOptions options = ReadStreamOptions.get()
+                .forwards()
+                .fromStart()
+                .notResolveLinkTos();
+
+        client.readStream("some-non-existing-stream", 10, options)
+                .subscribe(testSubscriber);
+
+        testSubscriber.awaitDone(5, TimeUnit.SECONDS);
+        testSubscriber.assertError(StreamNotFoundException.class);
+    }
+
+    @Test
+    public void testMoreEventsCanBeRequested() {
+        EventStoreDBClient client = server.getClient();
+        testSubscriber = new TestSubscriber<>(2);
 
         ReadStreamOptions options = ReadStreamOptions.get()
                 .forwards()
@@ -47,60 +126,13 @@ public class ReadStreamTests {
 
         client.readStream("dataset20M-1800", 10, options)
                 .subscribe(testSubscriber);
-        testSubscriber.requestMore(10);
+        testSubscriber.awaitCount(2);
+        testSubscriber.assertNotComplete();
 
-        testSubscriber.awaitCount(10);
+        testSubscriber.requestMore(10);
         testSubscriber.awaitDone(5, TimeUnit.SECONDS);
         testSubscriber.assertComplete();
         verifyAgainstTestData(testSubscriber.values(), "dataset20M-1800-e0-e10");
-    }
-
-    @Test
-    public void testReadStreamBackward10EventsFromPositionEnd() throws Throwable {
-        EventStoreDBClient client = server.getClient();
-
-        ReadStreamOptions options = ReadStreamOptions.get()
-                .backwards()
-                .fromEnd()
-                .notResolveLinkTos();
-
-       client.readStream("dataset20M-1800", 10, options)
-                .subscribe(testSubscriber);
-        testSubscriber.requestMore(10);
-
-        testSubscriber.awaitCount(10);
-        testSubscriber.awaitDone(5, TimeUnit.SECONDS);
-        testSubscriber.assertComplete();
-        verifyAgainstTestData(testSubscriber.values(), "dataset20M-1800-e1999-e1990");
-    }
-
-    @Test
-    public void testReadStreamOptionsAreNotIgnoredInOverloadedMethod() throws Throwable {
-        EventStoreDBClient client = server.getClient();
-
-        ReadStreamOptions options = ReadStreamOptions.get()
-                .backwards()
-                .fromEnd()
-                .notResolveLinkTos();
-
-        client.readStream("dataset20M-1800", Long.MAX_VALUE, options)
-                .subscribe(testSubscriber);
-
-        TestSubscriber<ResolvedEvent> secondTestSubscriber = new TestSubscriber<>(0);
-        client.readStream("dataset20M-1800", options)
-                .subscribe(secondTestSubscriber);
-        testSubscriber.requestMore(Long.MAX_VALUE);
-        secondTestSubscriber.requestMore(Long.MAX_VALUE);
-
-        testSubscriber.awaitDone(5, TimeUnit.SECONDS);
-        secondTestSubscriber.awaitDone(5, TimeUnit.SECONDS);
-        List<ResolvedEvent> valuesOfFirstSubscription = testSubscriber.values();
-        List<ResolvedEvent> valuesOfSecondSubscription = secondTestSubscriber.values();
-        RecordedEvent firstEvent1 = valuesOfFirstSubscription.get(0).getOriginalEvent();
-        RecordedEvent firstEvent2 = valuesOfSecondSubscription.get(0).getOriginalEvent();
-
-        Assert.assertEquals(valuesOfFirstSubscription.size(), valuesOfSecondSubscription.size());
-        Assert.assertEquals(firstEvent1.getEventId(), firstEvent2.getEventId());
     }
 
     private void verifyAgainstTestData(List<ResolvedEvent> actualEvents, String filenameStem) {

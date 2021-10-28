@@ -114,7 +114,14 @@ public class EventStoreDBClient extends EventStoreDBClientBase {
     public CompletableFuture<StreamMetadata> getStreamMetadata(String streamName, ReadStreamOptions options) {
         final StreamMetadataSubscriber streamMetadataSubscriber = new StreamMetadataSubscriber();
         readStream("$$" + streamName, options).subscribe(streamMetadataSubscriber);
-        return streamMetadataSubscriber.getStreamMetadata();
+        return streamMetadataSubscriber.getStreamMetadata().exceptionally(e -> {
+            Throwable reason = e.getCause() != null ? e.getCause() : e;
+            if (reason instanceof StreamNotFoundException) {
+                return new StreamMetadata();
+            }
+
+            throw new RuntimeException(e);
+        });
     }
 
     public Publisher<ResolvedEvent> readAll() {
@@ -143,7 +150,8 @@ public class EventStoreDBClient extends EventStoreDBClientBase {
         return this.subscribeToStream(streamName, listener, SubscribeToStreamOptions.get());
     }
 
-    public CompletableFuture<Subscription> subscribeToStream(String streamName, SubscriptionListener listener, SubscribeToStreamOptions options) {
+    public CompletableFuture<Subscription> subscribeToStream(String streamName, SubscriptionListener
+            listener, SubscribeToStreamOptions options) {
         if (options == null)
             options = SubscribeToStreamOptions.get();
 
@@ -157,7 +165,8 @@ public class EventStoreDBClient extends EventStoreDBClientBase {
         return this.subscribeToAll(listener, SubscribeToAllOptions.get());
     }
 
-    public CompletableFuture<Subscription> subscribeToAll(SubscriptionListener listener, SubscribeToAllOptions options) {
+    public CompletableFuture<Subscription> subscribeToAll(SubscriptionListener listener, SubscribeToAllOptions
+            options) {
         if (options == null)
             options = SubscribeToAllOptions.get();
 

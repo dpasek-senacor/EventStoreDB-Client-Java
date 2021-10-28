@@ -11,9 +11,10 @@ import io.grpc.stub.MetadataUtils;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public abstract class AbstractRead {
 
@@ -47,13 +48,15 @@ public abstract class AbstractRead {
             StreamsGrpc.StreamsStub client = MetadataUtils.attachHeaders(StreamsGrpc.newStub(channel), headers);
 
             Publisher<ResolvedEvent> eventPublisher = subscriber -> {
-                final List<Subscription> subscriptions = new ArrayList<>(1);
+                final CompletableFuture<Subscription> subscriptionFuture = new CompletableFuture<>();
                 ClientResponseObserver<StreamsOuterClass.ReadReq, StreamsOuterClass.ReadResp> clientResponseObserver = new ClientResponseObserver<StreamsOuterClass.ReadReq, StreamsOuterClass.ReadResp>() {
+                    private boolean completed;
 
                     @Override
                     public void beforeStart(ClientCallStreamObserver<StreamsOuterClass.ReadReq> requestStream) {
                         requestStream.disableAutoRequestWithInitial(0);
-                        subscriptions.add(new Subscription() {
+
+                        subscriptionFuture.complete(new Subscription() {
                             @Override
                             public void request(long n) {
                                 try {
@@ -63,6 +66,7 @@ public abstract class AbstractRead {
                                     requestStream.request((int) Math.min(n, Integer.MAX_VALUE));
                                 } catch (Throwable t) {
                                     subscriber.onError(t);
+                                    completed = true;
                                 }
                             }
 
@@ -75,26 +79,36 @@ public abstract class AbstractRead {
 
                     @Override
                     public void onNext(StreamsOuterClass.ReadResp value) {
+                        if (value.hasStreamNotFound()) {
+                            subscriber.onError(new StreamNotFoundException());
+                            completed = true;
+                            return;
+                        }
                         if (value.hasEvent()) {
                             try {
                                 subscriber.onNext(ResolvedEvent.fromWire(value.getEvent()));
                             } catch (Throwable t) {
                                 subscriber.onError(t);
+                                completed = true;
                             }
                         }
                     }
 
                     @Override
                     public void onCompleted() {
-                        try {
-                            subscriber.onComplete();
-                        } catch (Throwable t) {
-                            subscriber.onError(t);
+                        if (completed) {
+                            return;
                         }
+
+                        subscriber.onComplete();
                     }
 
                     @Override
                     public void onError(Throwable t) {
+                        if (completed) {
+                            return;
+                        }
+
                         if (t instanceof StatusRuntimeException) {
                             StatusRuntimeException e = (StatusRuntimeException) t;
                             if (e.getStatus() != null && MANUAL_CANCELLATION_MESSAGE.equals(e.getStatus().getDescription())) {
@@ -115,9 +129,10 @@ public abstract class AbstractRead {
                 };
                 client.read(request, clientResponseObserver);
                 try {
-                    subscriber.onSubscribe(subscriptions.get(0));
-                } catch (Throwable t) {
-                    subscriber.onError(t);
+                    Subscription subscription = subscriptionFuture.get(0, TimeUnit.SECONDS);
+                    subscriber.onSubscribe(subscription);
+                } catch (InterruptedException | ExecutionException | TimeoutException e) {
+                    throw new RuntimeException(e);
                 }
             };
             return CompletableFuture.completedFuture(eventPublisher);

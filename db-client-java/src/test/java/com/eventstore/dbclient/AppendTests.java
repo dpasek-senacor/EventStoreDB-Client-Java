@@ -72,9 +72,9 @@ public class AppendTests {
 
         // Ensure appended event is readable
         TestSubscriber<ResolvedEvent> testSubscriber = new TestSubscriber<>();
-        client.readStream(streamName, 1, readStreamOptions)
-                .subscribe(testSubscriber);
+        client.readStream(streamName, 1, readStreamOptions).subscribe(testSubscriber);
 
+        testSubscriber.await();
         assertEquals(1, testSubscriber.values().size());
         RecordedEvent first = testSubscriber.values().get(0).getEvent();
 
