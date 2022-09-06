@@ -98,4 +98,9 @@ public class EventStoreDBClusterClient extends GrpcClient {
 
         return true;
     }
+
+    @Override
+    protected void delayReconnectOnFailOver() {
+        sleep(settings.getGossipTimeout());
+    }
 }

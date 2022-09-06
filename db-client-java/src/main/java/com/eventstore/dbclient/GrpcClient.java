@@ -59,6 +59,9 @@ abstract class GrpcClient {
 
     protected abstract boolean doConnect();
 
+    protected void delayReconnectOnFailOver() {
+    }
+
     protected void pushMsg(Msg msg) {
         try {
             if (shutdown) {
@@ -116,7 +119,7 @@ abstract class GrpcClient {
                     StatusRuntimeException ex = (StatusRuntimeException) error;
 
                     if (ex.getStatus().getCode().equals(Status.Code.UNAVAILABLE) || ex.getStatus().getCode().equals(Status.Code.ABORTED)) {
-                        self.pushMsg(new CreateChannel(args.id));
+                        self.pushMsg(new CreateChannel(args.id, true));
                     }
                 }
 
@@ -137,13 +140,18 @@ abstract class GrpcClient {
         return runWithArgs(args -> CompletableFuture.completedFuture(args.endpoint));
     }
 
-    private boolean discover(UUID previousId, Optional<Endpoint> candidate) {
+    private boolean discover(UUID previousId, boolean isFailOver, Optional<Endpoint> candidate) {
         long attempts = 1;
 
         // It means we already created a new channel and it was old request.
         if (!currentChannelId.equals(previousId)) {
             logger.debug("Skipping connection attempt as new connection to endpoint [{}] has already been created.", endpoint);
             return true;
+        }
+
+        // On failover reconnects we wait for the gossip timeout to have se
+        if (isFailOver) {
+            delayReconnectOnFailOver();
         }
 
         if (candidate.isPresent()) {
@@ -204,7 +212,7 @@ abstract class GrpcClient {
         }
     }
 
-    protected void sleep(long millis) {
+    protected final void sleep(long millis) {
         try {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
@@ -219,7 +227,7 @@ abstract class GrpcClient {
         if (msg instanceof CreateChannel) {
             if (!this.shutdown) {
                 CreateChannel args = (CreateChannel) msg;
-                result = discover(args.previousId, args.channel);
+                result = discover(args.previousId, args.isFailOver, args.channel);
             } else {
                 logger.warn("Channel creation request ignored, the connection to endpoint [{}] is already closed", endpoint);
             }
@@ -418,15 +426,22 @@ abstract class GrpcClient {
     class CreateChannel implements Msg {
         final Optional<Endpoint> channel;
         final UUID previousId;
+        final boolean isFailOver;
 
         CreateChannel(UUID previousId) {
+            this(previousId, false);
+        }
+
+        CreateChannel(UUID previousId, boolean isFailOver) {
             this.channel = Optional.empty();
             this.previousId = previousId;
+            this.isFailOver = isFailOver;
         }
 
         CreateChannel(UUID previousId, Endpoint endpoint) {
             this.channel = Optional.of(endpoint);
             this.previousId = previousId;
+            this.isFailOver = true;
         }
 
         @Override
